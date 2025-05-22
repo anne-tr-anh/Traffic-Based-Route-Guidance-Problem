@@ -1,0 +1,17 @@
+category_encoders==2.8.1
+folium
+haversine
+matplotlib
+numpy
+openpyxl
+pandas
+pillow
+python-dateutil
+pytz
+scikit-learn==1.6.1
+seaborn
+streamlit
+streamlit_folium
+tensorflow>=2.10.0
+tensorboard>=2.10.0
+tqdm>=4.65.0
