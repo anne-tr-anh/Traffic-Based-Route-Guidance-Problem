@@ -2,45 +2,47 @@ import pandas as pd
 import networkx as nx
 import folium
 import webbrowser
-import os
 import math
 import tkinter as tk
 from tkinter import ttk
+from tkinter import messagebox
 from geopy.distance import geodesic
 import heapq
 from collections import defaultdict
 from collections import deque
 import numpy as np
 
-# === Load data ===
-# Load SCATS coordinates and neighbours
+# load SCATS coordinates and neighbours
 df_map = pd.read_csv("map.csv")
 df_map['SCATS Number'] = df_map['SCATS Number'].astype(int)
+
+# shift scats' coordinates slightly since the original lat and lon in the data set dont map google map correctly
 scats_coords = {
-    int(row['SCATS Number']): (row['Latitude'] + 0.0012, row['Longitude'] + 0.0012)  # Shift slightly
+    int(row['SCATS Number']): (row['Latitude'] + 0.0012, row['Longitude'] + 0.0012)
     for _, row in df_map.iterrows()
 }
 
-# Load traffic volume data
-df_data = pd.read_csv("complete_csv_oct_nov_2006\\bilstm_model\\bilstm_model_complete_data.csv")
+# load traffic volume data
+# (predictions made by BiLSTM model are used to estimate speed and travel time since BiLSTM performs the best out of 3 models)
+df_data = pd.read_csv("complete_oct_nov_csv\\bilstm_model\\bilstm_model_complete_data.csv")
 df_data['SCATS Number'] = df_data['SCATS Number'].astype(int)
-df_data['Date'] = pd.to_datetime(df_data['Date'])  # Ensure Date is in datetime format
+df_data['Date'] = pd.to_datetime(df_data['Date'])
 traffic_avg = df_data.groupby(['SCATS Number', 'Date', 'time_of_day'])['traffic_volume'].mean().reset_index()
 traffic_dict = defaultdict(dict)
 for _, row in traffic_avg.iterrows():
-    date_str = row['Date'].strftime('%Y-%m-%d')  # Convert date to string for dictionary key
+    date_str = row['Date'].strftime('%Y-%m-%d')  # date to string
     if date_str not in traffic_dict[row['SCATS Number']]:
         traffic_dict[row['SCATS Number']][date_str] = {}
     traffic_dict[row['SCATS Number']][date_str][row['time_of_day']] = row['traffic_volume']
 
-# Get unique time and date options
+# unique time and date options
 time_options = sorted(df_data['time_of_day'].unique())
 date_options = sorted(df_data['Date'].dt.strftime('%Y-%m-%d').unique())
 
 def compute_distance_km(lat1, lon1, lat2, lon2):
     return geodesic((lat1, lon1), (lat2, lon2)).km
 
-# === Graph structure ===
+# graph structure
 G = nx.DiGraph()
 for _, row in df_map.iterrows():
     A = int(row['SCATS Number'])
@@ -49,29 +51,29 @@ for _, row in df_map.iterrows():
         for B in neighbors:
             if B in scats_coords:
                 dist = compute_distance_km(scats_coords[A][0], scats_coords[A][1], 
-                                         scats_coords[B][0], scats_coords[B][1])
+                                            scats_coords[B][0], scats_coords[B][1])
                 G.add_edge(A, B, distance=dist)
 
-# === Travel time functions ===
+# travel time estimator functions
 def estimate_speed_from_flow(flow):
-    a = -1.4648375  # Coefficient for traffic_volume
-    b = 93.75    # Coefficient for traffic_volume
+    a = -1.4648375  # coefficient for traffic_volume
+    b = 93.75    # coefficient for traffic_volume
     c = -flow
     d = b * b - (4 * a * c)
-    speed = (-b - math.sqrt(d)) / (2 * a)  # km/h
-    speed = min(speed, 60)  # Cap speed at 60 km/h
-    speed = max(speed, 5)  # Minimum speed of 5 km/h
+    speed = (-b - math.sqrt(d)) / (2 * a)
+    speed = min(speed, 60)  # capped speed: 60 km/h
+    speed = max(speed, 5)  # minimum speed: 5 km/h
     return speed
 
 def calculate_travel_time(u, v, date, time):
     distance = G[u][v]['distance']
-    flow = traffic_dict[u].get(date, {}).get(time, 400)  # Default flow 400 if date/time not found
+    flow = traffic_dict[u].get(date, {}).get(time, 400)  # default flow 400 if date/time not found
     speed = estimate_speed_from_flow(flow)
-    # Convert to minutes and add 30 seconds for intersection delay
+    # add 30 seconds for intersection delay, then convert to minute
     travel_time = (distance / speed) * 60 + 30 / 60
     return travel_time
 
-# === Search Algorithms ===
+# search algorithms from assignment 2A
 def dfs_search(edges, origin, destinations):
     stack = [(origin, [origin])]
     visited = set()
@@ -102,6 +104,7 @@ def bfs_search(edges, origin, destinations):
                 if neighbor not in visited:
                     queue.append(path + [neighbor])
     return [], len(visited)
+
 def depth_limited_search(edges, origin, destinations, limit):
     stack = [(origin, [origin], 0)]
     visited = set()
@@ -119,7 +122,6 @@ def depth_limited_search(edges, origin, destinations, limit):
                         stack.append((neighbor, path + [neighbor], depth + 1))
     return [], len(visited)
 
-
 def iterative_deepening_search(edges, origin, destinations, max_depth=10):
     last_count = 0
     for depth in range(max_depth):
@@ -128,19 +130,6 @@ def iterative_deepening_search(edges, origin, destinations, max_depth=10):
         if path:
             return path, count
     return [], last_count
-def ucs(edges, origin, destinations):
-    heap = [(0, origin, [])]
-    visited = set()
-    
-    while heap:
-        cost, current, path = heapq.heappop(heap)
-        if current in destinations:
-            return path + [current], len(visited)
-        if current not in visited:
-            visited.add(current)
-            for neighbor, edge_cost in edges.get(current, []):
-                heapq.heappush(heap, (cost + edge_cost, neighbor, path + [current]))
-    return [], len(visited)
 
 def gbfs(edges, origin, destinations, heuristic):
     def get_best_heuristic(node):
@@ -267,11 +256,9 @@ def improved_heuristic(node, dest_coords, traffic_data):
     
     return (base_dist / avg_speed) * 60
 
-# === Map Functions ===
+# map functions
 def _create_base_map(df_map, zoom_start=13):
-    """
-    Create a base folium map with the center calculated from all SCATS sites
-    """
+    # create a base folium map with the center calculated from all SCATS sites
     center = [
         df_map['Latitude'].mean(),
         df_map['Longitude'].mean()
@@ -279,9 +266,7 @@ def _create_base_map(df_map, zoom_start=13):
     return folium.Map(location=center, zoom_start=zoom_start)
 
 def _add_all_sites(m, scats_coords, color='blue', radius=10, opacity=0.7):
-    """
-    Add all SCATS sites to the map with specified style
-    """
+    # add all SCATS sites to the map with specified style
     for scats, coord in scats_coords.items():
         folium.CircleMarker(
             location=coord,
@@ -292,57 +277,67 @@ def _add_all_sites(m, scats_coords, color='blue', radius=10, opacity=0.7):
             fill_opacity=opacity,
             popup=f"SCATS {scats}"
         ).add_to(m)
+
+    # connections between scats (blue lines)
+    for u, v in G.edges:
+        lat1, lon1 = scats_coords[u]
+        lat2, lon2 = scats_coords[v]
+        folium.PolyLine([(lat1, lon1), (lat2, lon2)], color="blue", weight=1).add_to(m)
+
     return m
 
-# === GUI ===
+# GUI
 def show_routes():
     try:
         src = int(combo_src.get())
         dst = int(combo_dst.get())
         time = combo_time.get()
         date = combo_date.get()
-        # date = "2006-11-01" # For testing, use a fixed date
         algorithm = combo_algorithm.get()
     except:
-        status.set("Invalid input")
+        messagebox.showerror(title = "Missing input", message = "Please fill in all fields")
         return
 
-    # Build dynamic edges with time-dependent costs
+    # build dynamic edges with time-dependent costs
     edges = defaultdict(list)
     for u, v in G.edges():
         travel_time = calculate_travel_time(u, v, date, time)
         edges[u].append((v, travel_time))
 
-    # Calculate heuristic
+    # calculate heuristic
     dest_coords = scats_coords[dst]
     heuristic = defaultdict(dict)
     for node in G.nodes():
         node_coords = scats_coords[node]
         dist = compute_distance_km(*node_coords, *dest_coords)
-        heuristic[node][dst] = (dist / 64) * 60  # Max speed heuristic
+        heuristic[node][dst] = (dist / 64) * 60  # maximum speed heuristic
 
-    # Algorithm selection
+    # algorithm selection
     path = []
     nodes_expanded = 0
     
-    if algorithm == "A*":
+    if algorithm == "A* Search":
         path, nodes_expanded = a_star(edges, src, [dst], heuristic)
-    elif algorithm == "DFS":
+    elif algorithm == "Depth First Search":
         path, nodes_expanded = dfs_search(edges, src, [dst])
-    elif algorithm == "BFS":
+    elif algorithm == "Breadth First Search":
         path, nodes_expanded = bfs_search(edges, src, [dst])
-    elif algorithm == "GBFS":
+    elif algorithm == "Greedy Best First Search":
         path, nodes_expanded = gbfs(edges, src, [dst], heuristic)
-    elif algorithm == "depth-limited":
+    elif algorithm == "Depth-Limited Search":
         path, nodes_expanded = iterative_deepening_search(edges, src, [dst])
-    elif algorithm == "Weighted A*":
+    elif algorithm == "Weighted A* Search":
         path, nodes_expanded = weighted_a_star(edges, src, [dst], heuristic, 1.5)
     
-    # Update display
+    # update display
     route_display.delete("1.0", tk.END)
     if not path:
         route_display.insert(tk.END, "No path found")
     else:
+        if date == "2006-11-01" or date == "2006-11-02":
+            route_display.insert(tk.END, "Estimating travel time based on traffic volume prediction...\n\n")
+        else:
+            route_display.insert(tk.END, "Calculating travel time based on recorded data...\n\n")
         details = calculate_route_details(path, edges)
         route_display.insert(tk.END, f"Algorithm: {algorithm}\n")
         route_display.insert(tk.END, f"Nodes expanded: {nodes_expanded}\n")
@@ -354,16 +349,16 @@ def show_routes():
                 f"From SCATS {step['from']} to {step['to']}\n"
                 f"Time: {step['time']} | Distance: {step['distance']}\n\n")
         
-        # Draw map
-        m = _create_base_map(df_map, zoom_start=13)
-        m = _add_all_sites(m, scats_coords, color='blue', radius=10, opacity=0.7)
+        # draw map
+        map = _create_base_map(df_map, zoom_start=13)
+        map = _add_all_sites(map, scats_coords, color='blue', radius=10, opacity=0.7)
         
-        # Highlight the route
+        # highlight the route
         path_coords = [scats_coords[n] for n in path]
-        folium.PolyLine(path_coords, color='red', weight=5).add_to(m)
+        folium.PolyLine(path_coords, color='red', weight=5).add_to(map)
         
-        # Save and display map
-        m.save("map.html")
+        # save and display map
+        map.save("map.html")
         webbrowser.open("map.html")
 
 # GUI layout
@@ -373,30 +368,35 @@ root.title("SCATS Route Finder")
 left_frame = ttk.Frame(root, padding=10)
 left_frame.grid(row=0, column=0, sticky="nsew")
 
+# origin scats input
 ttk.Label(left_frame, text="Origin SCATS:").grid(row=0, column=0)
 combo_src = ttk.Combobox(left_frame, values=sorted(scats_coords.keys()), state="readonly")
 combo_src.grid(row=0, column=1)
 
+# destination scats input
 ttk.Label(left_frame, text="Destination SCATS:").grid(row=1, column=0)
 combo_dst = ttk.Combobox(left_frame, values=sorted(scats_coords.keys()), state="readonly")
 combo_dst.grid(row=1, column=1)
 
-ttk.Label(left_frame, text="Date: 2006-11-01").grid(row=2, column=0)
+# date input
+ttk.Label(left_frame, text="Date:").grid(row=2, column=0)
 combo_date = ttk.Combobox(left_frame, values=date_options, state="readonly")
 combo_date.grid(row=2, column=1)
 combo_date.set("2006-11-01")
 
+# start time
 ttk.Label(left_frame, text="Start Time:").grid(row=3, column=0)
 combo_time = ttk.Combobox(left_frame, values=time_options, state="readonly")
 combo_time.grid(row=3, column=1)
 
-# Add algorithm selection
+# add algorithm selection
 ttk.Label(left_frame, text="Algorithm:").grid(row=4, column=0)
-algorithms = ["A*", "DFS", "BFS", "GBFS", "depth-limited", "Weighted A*"]
+algorithms = ["A* Search", "Depth First Search", "Breadth First Search", "Greedy Best First Search", "Depth-Limited Search", "Weighted A* Search"]
 combo_algorithm = ttk.Combobox(left_frame, values=algorithms, state="readonly")
 combo_algorithm.grid(row=4, column=1)
-combo_algorithm.set("A*")
+combo_algorithm.set("A* Search")
 
+# find route
 ttk.Button(left_frame, text="Find Route", command=show_routes).grid(row=5, columnspan=2, pady=10)
 status = tk.StringVar()
 ttk.Label(left_frame, textvariable=status).grid(row=6, columnspan=2)
