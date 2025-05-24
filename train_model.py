@@ -12,9 +12,6 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
-import tensorflow as tf
 from tensorflow.keras import Model, Input
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import (
@@ -32,14 +29,11 @@ from tensorflow.keras.layers import (
     Embedding,
     Concatenate,
     BatchNormalization,
-    # Conv1D,
-    # MaxPooling1D,
     Attention,
     GlobalAveragePooling1D,
-    # LayerNormalization,
-    # MultiHeadAttention,
-    # Add,
 )
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 def create_lstm_model(seq_length, n_features, n_scats, embedding_dim=16, lstm_units=128, dropout_rate=0.2, use_attention=True):
 
@@ -51,6 +45,25 @@ def create_lstm_model(seq_length, n_features, n_scats, embedding_dim=16, lstm_un
     x = LSTM(lstm_units, return_sequences=True, dropout=dropout_rate)(x)
     x = LSTM(lstm_units // 2, return_sequences=True, dropout=dropout_rate)(x)
     x = LSTM(lstm_units // 4, return_sequences=True, dropout=dropout_rate)(x)  
+    if use_attention:
+        x = Attention()([x, x])
+    x = GlobalAveragePooling1D()(x)
+    x = Dense(64, activation="relu")(x)
+    x = Dropout(dropout_rate)(x)
+    out = Dense(1, name="output")(x)
+
+    return Model([x_feature, x_scats], out)
+
+def create_gru_model(seq_length, n_features, n_scats, embedding_dim=16, gru_units=128, dropout_rate=0.2, use_attention=True):
+
+    x_feature = Input((seq_length, n_features), name="feature_input")
+    x_scats = Input((seq_length,), dtype="int32", name="scats_input")
+    embed_scats = Embedding(n_scats, embedding_dim)(x_scats)
+    
+    x = Concatenate(axis=2)([x_feature, embed_scats])
+    x = GRU(gru_units, return_sequences=True, dropout=dropout_rate)(x)
+    x = GRU(gru_units // 2, return_sequences=True, dropout=dropout_rate)(x)
+    x = GRU(gru_units // 4, return_sequences=True, dropout=dropout_rate)(x)
     if use_attention:
         x = Attention()([x, x])
     x = GlobalAveragePooling1D()(x)
@@ -75,25 +88,6 @@ def create_bidirectional_lstm_model(seq_length, n_features, n_scats, embedding_d
     x = GlobalAveragePooling1D()(x)
     x = BatchNormalization()(x)
     x = Dense(32, activation="relu")(x)
-    x = Dropout(dropout_rate)(x)
-    out = Dense(1, name="output")(x)
-
-    return Model([x_feature, x_scats], out)
-
-def create_gru_model(seq_length, n_features, n_scats, embedding_dim=16, gru_units=128, dropout_rate=0.2, use_attention=True):
-
-    x_feature = Input((seq_length, n_features), name="feature_input")
-    x_scats = Input((seq_length,), dtype="int32", name="scats_input")
-    embed_scats = Embedding(n_scats, embedding_dim)(x_scats)
-    
-    x = Concatenate(axis=2)([x_feature, embed_scats])
-    x = GRU(gru_units, return_sequences=True, dropout=dropout_rate)(x)
-    x = GRU(gru_units // 2, return_sequences=True, dropout=dropout_rate)(x)
-    x = GRU(gru_units // 4, return_sequences=True, dropout=dropout_rate)(x)
-    if use_attention:
-        x = Attention()([x, x])
-    x = GlobalAveragePooling1D()(x)
-    x = Dense(64, activation="relu")(x)
     x = Dropout(dropout_rate)(x)
     out = Dense(1, name="output")(x)
 
@@ -208,9 +202,7 @@ def evaluate_model(model, X_test_inputs, y_test, meta_test, model_name, output_d
     }
 
 def create_model(model_type, **kwargs):
-    """
-    Create model of specified type
-    """
+    # Create model of specified type
     if model_type not in Model_List:
         raise ValueError(f"Unknown model type: {model_type}. Available: {list(Model_List.keys())}")
     return Model_List[model_type](**kwargs)
@@ -294,7 +286,6 @@ if __name__ == "__main__":
         model_name = model_type
         config["name"] = model_name
 
-        # 
         model_params.update({
             "seq_length": data["X_train"].shape[1],
             "n_features": data["n_features"],
@@ -304,7 +295,7 @@ if __name__ == "__main__":
         print(f"\n{'='*50}")
         print(f"Creating {model_type} model...")
 
-        # Tạo model
+        # create model
         if "create_model_func" in config:
             model = config["create_model_func"](**model_params)
         else:
@@ -318,7 +309,7 @@ if __name__ == "__main__":
             output_dir=models_dir,
             X_train_inputs=data["X_train_inputs"],
             y_train=data["y_train"],
-            X_val_inputs=data["X_val_inputs"],   #
+            X_val_inputs=data["X_val_inputs"],
             y_val=data["y_val"],
             model_name=model_name,
             **train_params,
