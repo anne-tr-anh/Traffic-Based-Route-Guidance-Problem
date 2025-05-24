@@ -3,7 +3,7 @@
 # This script creates and trains three models - LSTM, GRU, BiLSTM.
 #########################################
 
-import data_processor
+import data_processing
 import pandas as pd
 import os
 import numpy as np
@@ -209,7 +209,7 @@ def create_model(model_type, **kwargs):
 
 if __name__ == "__main__":
 
-    data = data_processor.load_processed_data(input_dir="processed_data/")
+    data = data_processing.load_processed_data(input_dir="processed_data/")
 
     # concatenate _train and _test to train first, then split again to test
     X_full = np.concatenate([data["X_train"], data["X_test"]], axis=0)
@@ -221,9 +221,9 @@ if __name__ == "__main__":
 
     # prepare embedding inputs
     feature_cols = data["feature_cols"]
-    X_train_inputs = data_processor.prepare_inputs(X_train, feature_cols)
-    X_val_inputs = data_processor.prepare_inputs(X_val, feature_cols)
-    X_test_inputs = data_processor.prepare_inputs(X_test, feature_cols)
+    X_train_inputs = data_processing.prepare_inputs(X_train, feature_cols)
+    X_val_inputs = data_processing.prepare_inputs(X_val, feature_cols)
+    X_test_inputs = data_processing.prepare_inputs(X_test, feature_cols)
 
     # update data dictionary
     data.update({
