@@ -420,7 +420,7 @@ class TrafficPredictor:
         with open(summary_file, "wb") as f:
             pickle.dump(summary, f)
 
-        print(f"\nPrediction Summary:")
+        print("\nPrediction Summary:")
         print(f"Model: {model_name}")
         print(f"Total predictions: {summary['total_predictions']}")
         print(f"SCATS Numbers processed: {len(summary['scats_numbers'])}")
