@@ -1,38 +1,29 @@
 import os
 import pickle
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import (
-    mean_squared_error,
     mean_absolute_error,
     r2_score,
-    explained_variance_score,
     mean_absolute_percentage_error
 )
-from scipy.stats import pearsonr, spearmanr
 from collections import defaultdict
 
 class ModelEvaluator:
-    def __init__(self, data_dir="complete_oct_nov_csv"):
+    def __init__(self, data_dir="oct3_csv"):
         self.data_dir = data_dir
         self.models = ["gru_model", "lstm_model", "bilstm_model"]
         self.metrics = {
-            "MSE": mean_squared_error,
-            "RMSE": lambda y_true, y_pred: np.sqrt(mean_squared_error(y_true, y_pred)),
             "MAE": mean_absolute_error,
             "MAPE": mean_absolute_percentage_error,
-            "R2": r2_score,
-            "Explained Variance": explained_variance_score,
-            "Pearson R": lambda y_true, y_pred: pearsonr(y_true, y_pred)[0],
-            "Spearman R": lambda y_true, y_pred: spearmanr(y_true, y_pred)[0]
+            "R2": r2_score
         }
         
     def load_data(self, model_name):
         # Load data for a specific model
-        model_dir = os.path.join(self.data_dir, model_name)
-        data_file = os.path.join(model_dir, f"{model_name}_complete_data.pkl")
+        model_dir = os.path.join(self.data_dir)
+        data_file = os.path.join(model_dir, f"october_1_3_combined_{model_name}.pkl")
         print("Looking for:", data_file)
         if not os.path.exists(data_file):
             raise FileNotFoundError(f"Data file not found for model {model_name}")
@@ -43,22 +34,29 @@ class ModelEvaluator:
     def prepare_evaluation_data(self):
         # Prepare data for all models
         self.model_data = {}
-        
+
         for model in self.models:
             try:
                 df = self.load_data(model)
-                # Filter to only predicted data (not original or filled)
+                # Split into predicted and original
                 pred_df = df[df["data_source"] == "predicted"].copy()
-                
-                pred_df["actual_traffic"] = self._get_actual_data(pred_df)
-                
-                self.model_data[model] = pred_df.dropna(subset=["actual_traffic", "traffic_volume"])
+                orig_df = df[df["data_source"] == "original"].copy()
+
+                # Merge predictions with ground truth
+                merged = pd.merge(
+                    pred_df,
+                    orig_df[["SCATS Number", "Date", "interval_id", "time_of_day", "traffic_volume"]],
+                    on=["SCATS Number", "Date", "interval_id", "time_of_day"],
+                    how="left",
+                    suffixes=('', '_actual')
+                )
+                merged = merged.rename(columns={"traffic_volume_actual": "actual_traffic"})
+                # Drop rows where actual_traffic is missing
+                merged = merged.dropna(subset=["actual_traffic", "traffic_volume"])
+                self.model_data[model] = merged
             except Exception as e:
                 print(f"Error loading data for {model}: {str(e)}")
                 self.model_data[model] = None
-    
-    def _get_actual_data(self, pred_df):
-        return np.random.rand(len(pred_df)) * 100
     
     def calculate_metrics(self):
         # Calculate all metrics for all models
@@ -100,7 +98,7 @@ class ModelEvaluator:
     def _generate_visualizations(self, results_df):
         # Generate comparison visualizations
         # Metric comparison bar plot
-        metrics_to_plot = ["RMSE", "MAE", "R2", "Pearson R"]
+        metrics_to_plot = ["MAE", "MAPE", "R2"]
         plt.figure(figsize=(12, 6))
         results_df[metrics_to_plot].plot(kind="bar", width=0.8)
         plt.title("Model Performance Comparison")

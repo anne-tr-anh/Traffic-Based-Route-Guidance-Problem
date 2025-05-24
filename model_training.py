@@ -156,50 +156,6 @@ def train_model(model, X_train_inputs, y_train, X_val_inputs, y_val, epochs=100,
     print(f"Training completed in {elapsed:.2f} seconds")
     return history
 
-def evaluate_model(model, X_test_inputs, y_test, meta_test, model_name, output_dir="evaluations"):
-
-    print(f"\nEvaluating model {model_name}...")
-    
-    # Create output directory
-    eval_dir = Path(output_dir) / model_name
-    eval_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Make predictions
-    y_pred = model.predict(X_test_inputs).flatten()
-    
-    # Calculate metrics
-    mse = mean_squared_error(y_test, y_pred)
-    rmse = np.sqrt(mse)
-    mae = mean_absolute_error(y_test, y_pred)
-    r2 = r2_score(y_test, y_pred)
-    
-    print(f"MSE: {mse:.4f}, RMSE: {rmse:.4f}, MAE: {mae:.4f}, R2: {r2:.4f}")
-    
-    # Add predictions to metadata
-    results = meta_test.copy()
-    results["actual"] = y_test
-    results["predicted"] = y_pred
-    results["error"] = y_test - y_pred
-    
-    # Save results
-    results.to_csv(eval_dir / "predictions.csv", index=False)
-    
-    # Plot results by SCATS Number
-    plt.figure(figsize=(12, 6))
-    sns.boxplot(x="SCATS Number", y="error", data=results)
-    plt.xticks(rotation=90)
-    plt.title(f"Prediction Errors by SCATS Number - {model_name}")
-    plt.tight_layout()
-    plt.savefig(eval_dir / "errors_by_scats.png")
-    plt.close()
-    
-    return {
-        "mse": mse,
-        "rmse": rmse,
-        "mae": mae,
-        "r2": r2,
-        "results": results,
-    }
 
 def create_model(model_type, **kwargs):
     # Create model of specified type
@@ -277,7 +233,7 @@ if __name__ == "__main__":
         },
     ]
 
-    # Train and evaluate each model
+    # Train each model
     results = {}
     for config in models_to_train:
         model_type = config["type"]
@@ -315,18 +271,7 @@ if __name__ == "__main__":
             **train_params,
         )
 
-        # Evaluate model
-        evaluation_results = evaluate_model(
-            model=model,
-            X_test_inputs=data["X_test_inputs"],
-            y_test=data["y_test"],
-            meta_test=data["meta_test"],
-            model_name=model_name,
-            output_dir=os.path.join(models_dir, "evaluations", model_name),
-        )
-
         results[config["name"]] = {
             "model": model,
             "training_results": training_results,
-            "evaluation_results": evaluation_results,
         }

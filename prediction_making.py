@@ -27,12 +27,14 @@ class TrafficPredictor:
         self.data_path = 'processed_data'
         self.prediction_output_path = 'predicted_csv'
         self.final_output_path = 'complete_oct_nov_csv'
+        self.oct3output_path = 'oct3_csv'
         self.seq_length = 24
         self.batch_size = 128
         
         # Ensure output directories exist
         os.makedirs(self.prediction_output_path, exist_ok=True)
         os.makedirs(self.final_output_path, exist_ok=True)
+        os.makedirs(self.oct3output_path, exist_ok=True)
         
         # Check TensorFlow version
         if tf.__version__ < "2.15":
@@ -203,7 +205,7 @@ class TrafficPredictor:
             "key", axis=1
         )
 
-        return df_october_missing.sort_values(["Date", "interval_id", "SCATS Number"])
+        return df_october_missing.sort_values(["SCATS Number", "Date", "interval_id"])
 
     def batch_predict_interval(self, seq_manager, scats_numbers, target_date, target_interval, model):
         # Predict for all SCATS Numbers at a specific interval
@@ -429,7 +431,7 @@ class TrafficPredictor:
             print(f"Mean predicted traffic: {summary['prediction_stats']['mean']:.2f}")
             print(f"Std predicted traffic: {summary['prediction_stats']['std']:.2f}")
 
-        print(f"\n✓ Completed predictions for {model_name}")
+        print(f"\nCompleted predictions for {model_name}")
         
         # Now process the combined data
         self.process_combined_data(model_name)
@@ -601,7 +603,7 @@ class TrafficPredictor:
         print(f"  Added missing records: {len(df_combined[df_combined['data_source'] == 'added_missing'])}")
         print(f"  Records with NaN traffic volume: {df_combined['traffic_volume'].isna().sum()}")
 
-    def run_all_models(self):
+    def run_oct_nov_all_models(self):
         # Run predictions and data processing for all models
         self.load_data_components()
         
@@ -613,6 +615,63 @@ class TrafficPredictor:
         print(f"Prediction results saved in: {self.prediction_output_path}")
         print(f"Final combined data saved in: {self.final_output_path}")
 
+    def run_3_dates_oct_all_models(self):
+        self.load_data_components()
+        for model_info in self.models:
+            print(f"\nRunning predictions for dates 2006-10-01 - 2006-10-03 with model: {model_info['name']}")
+            model = tf.keras.models.load_model(model_info['path'])
+            scats_numbers = sorted(self.df_clean["SCATS Number"].unique())
+            seq_manager = self.SequenceManager(scats_numbers, self.seq_length)
+            seq_manager.initialize_sequences(self.df_clean)
+            all_predictions = []
+            prediction_start = pd.Timestamp("2006-10-01")
+            prediction_end = pd.Timestamp("2006-10-03")
+            all_dates = pd.date_range(prediction_start, prediction_end, freq="D")
+            for date in all_dates:
+                for interval in range(96):
+                    interval_predictions = self.batch_predict_interval(
+                        seq_manager, scats_numbers, date, interval, model
+                    )
+                    for pred in interval_predictions:
+                        seq_manager.update_sequence(
+                            pred["SCATS Number"],
+                            pred["Date"],
+                            pred["interval_id"],
+                            pred["predicted_traffic"],
+                        )
+                        all_predictions.append(pred)
+            df_predictions = pd.DataFrame(all_predictions)
+            df_predictions['data_source'] = 'predicted'
+
+            # Rename predicted_traffic to traffic_volume if needed
+            if 'predicted_traffic' in df_predictions.columns:
+                df_predictions = df_predictions.rename(columns={'predicted_traffic': 'traffic_volume'})
+
+            # Filter original data for the first 3 days of October
+            df_original = self.df_clean[
+                (self.df_clean["Date"] >= prediction_start) & (self.df_clean["Date"] <= prediction_end)
+            ][["SCATS Number", "Date", "interval_id", "time_of_day", "traffic_volume"]].copy()
+            df_original['data_source'] = 'original'
+
+            # Keep only required columns in predictions
+            df_predictions = df_predictions[["SCATS Number", "Date", "interval_id", "time_of_day", "traffic_volume", "data_source"]]
+
+            # Combine original and predicted
+            df_combined = pd.concat([df_original, df_predictions], ignore_index=True)
+
+            # Save combined data
+            combined_file = os.path.join(self.oct3output_path, f"october_1_3_combined_{model_info['name']}.csv")
+            df_combined.to_csv(combined_file, index=False)
+            print(f"Saved combined data to: {combined_file}")
+
+            # Save pickle file for the combined data
+            pickle_file = os.path.join(self.oct3output_path, f'october_1_3_combined_{model_info['name']}.pkl')
+            with open(pickle_file, 'wb') as f:
+                pickle.dump(df_combined, f)
+
 if __name__ == "__main__":
-    predictor = TrafficPredictor()
-    predictor.run_all_models()
+    octnovpredictor = TrafficPredictor()
+    octnovpredictor.run_oct_nov_all_models()
+
+    oct3predictor = TrafficPredictor()
+    oct3predictor.run_3_dates_oct_all_models()

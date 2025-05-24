@@ -13,7 +13,7 @@ from collections import deque
 import numpy as np
 
 # load SCATS coordinates and neighbours
-df_map = pd.read_csv("map.csv")
+df_map = pd.read_csv("data\\map.csv")
 df_map['SCATS Number'] = df_map['SCATS Number'].astype(int)
 
 # shift scats' coordinates slightly since the original lat and lon in the data set dont map google map correctly
@@ -21,6 +21,13 @@ scats_coords = {
     int(row['SCATS Number']): (row['Latitude'] + 0.0012, row['Longitude'] + 0.0012)
     for _, row in df_map.iterrows()
 }
+
+# Create display mapping for SCATS number and location
+scats_display_map = {
+    int(row['SCATS Number']): f"{int(row['SCATS Number'])} - {row['Site Description']}"
+    for _, row in df_map.iterrows()
+}
+display_to_scats = {v: k for k, v in scats_display_map.items()}
 
 # load traffic volume data
 # (predictions made by BiLSTM model are used to estimate speed and travel time since BiLSTM performs the best out of 3 models)
@@ -67,7 +74,7 @@ def estimate_speed_from_flow(flow):
 
 def calculate_travel_time(u, v, date, time):
     distance = G[u][v]['distance']
-    flow = traffic_dict[u].get(date, {}).get(time, 400)  # default flow 400 if date/time not found
+    flow = traffic_dict[u][date][time]
     speed = estimate_speed_from_flow(flow)
     # add 30 seconds for intersection delay, then convert to minute
     travel_time = (distance / speed) * 60 + 30 / 60
@@ -220,25 +227,45 @@ def build_path(node, parent):
         node = parent.get(node)
     return path[::-1]
 
-def calculate_route_details(path, edges):
+def calculate_route_details(path, edges, date, start_time):
     total_time = 0
     total_distance = 0
     steps = []
-    
+
+    # Convert start_time (e.g., "07:00") to minutes since midnight
+    h, m = map(int, start_time.split(":"))
+    current_minutes = h * 60 + m
+    current_date = pd.to_datetime(date)
+
     for i in range(len(path)-1):
         u, v = path[i], path[i+1]
-        edge_data = next((cost for node, cost in edges[u] if node == v), 0)
-        total_time += edge_data
+
+        # Round down to nearest 15-minute interval
+        rounded_minutes = (int(current_minutes) // 15) * 15
+        time_of_day = f"{rounded_minutes//60:02d}:{rounded_minutes%60:02d}"
+
+        # Calculate travel time for this segment
+        travel_time = calculate_travel_time(u, v, date, time_of_day)
+        total_time += travel_time
+
+        # Update current_minutes for next segment
+        current_minutes += travel_time
+        # If current_minutes >= 1440, increment date and wrap around
+        if current_minutes >= 1440:
+            current_minutes -= 1440
+            current_date += pd.Timedelta(days=1)
+            date = current_date.strftime('%Y-%m-%d')
+
         dist = compute_distance_km(*scats_coords[u], *scats_coords[v])
         total_distance += dist
-        
+
         steps.append({
             'from': u,
             'to': v,
-            'time': f"{edge_data:.2f} min",
+            'time': f"{travel_time:.2f} min",
             'distance': f"{dist:.2f} km"
         })
-    
+
     return {
         'total_time': f"{total_time:.2f} min",
         'total_distance': f"{total_distance:.2f} km",
@@ -288,15 +315,16 @@ def _add_all_sites(m, scats_coords, color='blue', radius=10, opacity=0.7):
 
 # GUI
 def show_routes():
-    try:
-        src = int(combo_src.get())
-        dst = int(combo_dst.get())
-        time = combo_time.get()
-        date = combo_date.get()
-        algorithm = combo_algorithm.get()
-    except:
-        messagebox.showerror(title = "Missing input", message = "Please fill in all fields")
+    src_value = combo_src.get()
+    dst_value = combo_dst.get()
+    time = combo_time.get()
+    date = combo_date.get()
+    algorithm = combo_algorithm.get()
+    if not src_value or not dst_value or not time or not date or not algorithm:
+        messagebox.showerror(title="Missing input", message="Please fill in all fields")
         return
+    src = display_to_scats[src_value]
+    dst = display_to_scats[dst_value]
 
     # build dynamic edges with time-dependent costs
     edges = defaultdict(list)
@@ -334,20 +362,20 @@ def show_routes():
     if not path:
         route_display.insert(tk.END, "No path found")
     else:
-        if date == "2006-11-01" or date == "2006-11-02":
-            route_display.insert(tk.END, "Estimating travel time based on traffic volume prediction...\n\n")
-        else:
-            route_display.insert(tk.END, "Calculating travel time based on recorded data...\n\n")
-        details = calculate_route_details(path, edges)
+        details = calculate_route_details(path, edges, date, time)
         route_display.insert(tk.END, f"Algorithm: {algorithm}\n")
         route_display.insert(tk.END, f"Nodes expanded: {nodes_expanded}\n")
         route_display.insert(tk.END, f"Total Time: {details['total_time']}\n")
         route_display.insert(tk.END, f"Total Distance: {details['total_distance']}\n\n")
         
         for step in details['steps']:
-            route_display.insert(tk.END, 
-                f"From SCATS {step['from']} to {step['to']}\n"
-                f"Time: {step['time']} | Distance: {step['distance']}\n\n")
+            from_display = scats_display_map.get(step['from'], str(step['from']))
+            to_display = scats_display_map.get(step['to'], str(step['to']))
+            route_display.insert(
+                tk.END,
+                f"From {from_display} to {to_display}\n"
+                f"Time: {step['time']} | Distance: {step['distance']}\n\n"
+    )
         
         # draw map
         map = _create_base_map(df_map, zoom_start=13)
@@ -364,36 +392,38 @@ def show_routes():
 # GUI layout
 root = tk.Tk()
 root.title("SCATS Route Finder")
+root.geometry("1100x700")
 
 left_frame = ttk.Frame(root, padding=10)
 left_frame.grid(row=0, column=0, sticky="nsew")
+root.grid_columnconfigure(0, minsize=400)
 
 # origin scats input
-ttk.Label(left_frame, text="Origin SCATS:").grid(row=0, column=0)
-combo_src = ttk.Combobox(left_frame, values=sorted(scats_coords.keys()), state="readonly")
-combo_src.grid(row=0, column=1)
+ttk.Label(left_frame, text="Origin SCATS:").grid(row=0, column=0, sticky="w")
+combo_src = ttk.Combobox(left_frame, values=sorted(scats_display_map.values()), state="readonly", width=45)
+combo_src.grid(row=0, column=1, padx=(20, 0))
 
 # destination scats input
-ttk.Label(left_frame, text="Destination SCATS:").grid(row=1, column=0)
-combo_dst = ttk.Combobox(left_frame, values=sorted(scats_coords.keys()), state="readonly")
-combo_dst.grid(row=1, column=1)
+ttk.Label(left_frame, text="Destination SCATS:").grid(row=1, column=0, sticky="w")
+combo_dst = ttk.Combobox(left_frame, values=sorted(scats_display_map.values()), state="readonly", width=45)
+combo_dst.grid(row=1, column=1, padx=(20, 0))
 
 # date input
-ttk.Label(left_frame, text="Date:").grid(row=2, column=0)
-combo_date = ttk.Combobox(left_frame, values=date_options, state="readonly")
-combo_date.grid(row=2, column=1)
+ttk.Label(left_frame, text="Date:").grid(row=2, column=0, sticky="w")
+combo_date = ttk.Combobox(left_frame, values=date_options, state="readonly", width=45)
+combo_date.grid(row=2, column=1, padx=(20, 0))
 combo_date.set("2006-11-01")
 
 # start time
-ttk.Label(left_frame, text="Start Time:").grid(row=3, column=0)
-combo_time = ttk.Combobox(left_frame, values=time_options, state="readonly")
-combo_time.grid(row=3, column=1)
+ttk.Label(left_frame, text="Start Time:").grid(row=3, column=0, sticky="w")
+combo_time = ttk.Combobox(left_frame, values=time_options, state="readonly", width=45)
+combo_time.grid(row=3, column=1, padx=(20, 0))
 
 # add algorithm selection
-ttk.Label(left_frame, text="Algorithm:").grid(row=4, column=0)
+ttk.Label(left_frame, text="Algorithm:").grid(row=4, column=0, sticky="w")
 algorithms = ["A* Search", "Depth First Search", "Breadth First Search", "Greedy Best First Search", "Depth-Limited Search", "Weighted A* Search"]
-combo_algorithm = ttk.Combobox(left_frame, values=algorithms, state="readonly")
-combo_algorithm.grid(row=4, column=1)
+combo_algorithm = ttk.Combobox(left_frame, values=algorithms, state="readonly", width=45)
+combo_algorithm.grid(row=4, column=1, padx=(20, 0))
 combo_algorithm.set("A* Search")
 
 # find route
@@ -404,7 +434,8 @@ ttk.Label(left_frame, textvariable=status).grid(row=6, columnspan=2)
 right_frame = ttk.Frame(root, padding=10)
 right_frame.grid(row=0, column=1, sticky="nsew")
 
-route_display = tk.Text(right_frame, wrap=tk.WORD, width=50, height=30)
+route_display = tk.Text(right_frame, wrap=tk.WORD, width=79, height=42)
+route_display.insert(tk.END, "Route details will be displayed here.\n")
 route_display.pack(fill=tk.BOTH, expand=True)
 
 root.mainloop()
