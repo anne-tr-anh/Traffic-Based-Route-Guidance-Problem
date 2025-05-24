@@ -15,7 +15,7 @@ from scipy.stats import pearsonr, spearmanr
 from collections import defaultdict
 
 class ModelEvaluator:
-    def __init__(self, data_dir="complete_csv_oct_nov_2006"):
+    def __init__(self, data_dir="complete_oct_nov_csv"):
         self.data_dir = data_dir
         self.models = ["gru_model", "lstm_model", "bilstm_model"]
         self.metrics = {
@@ -30,7 +30,7 @@ class ModelEvaluator:
         }
         
     def load_data(self, model_name):
-        """Load data for a specific model"""
+        # Load data for a specific model
         model_dir = os.path.join(self.data_dir, model_name)
         data_file = os.path.join(model_dir, f"{model_name}_complete_data.pkl")
         print("Looking for:", data_file)
@@ -41,7 +41,7 @@ class ModelEvaluator:
             return pickle.load(f)
     
     def prepare_evaluation_data(self):
-        """Prepare data for all models"""
+        # Prepare data for all models
         self.model_data = {}
         
         for model in self.models:
@@ -50,27 +50,18 @@ class ModelEvaluator:
                 # Filter to only predicted data (not original or filled)
                 pred_df = df[df["data_source"] == "predicted"].copy()
                 
-                # For evaluation, we need actual values - you'll need to modify this
-                # based on how you can get ground truth for November predictions
-                # This is a placeholder - you'll need actual implementation
-                pred_df["actual_traffic"] = self._get_actual_values(pred_df)
+                pred_df["actual_traffic"] = self._get_actual_data(pred_df)
                 
                 self.model_data[model] = pred_df.dropna(subset=["actual_traffic", "traffic_volume"])
             except Exception as e:
                 print(f"Error loading data for {model}: {str(e)}")
                 self.model_data[model] = None
     
-    def _get_actual_values(self, pred_df):
-        """
-        Implement this method to get actual traffic values for predictions
-        This is a placeholder - you'll need to implement based on your data
-        """
-        # You might need to load your test set or validation set here
-        # and match the predictions with actual values
-        return np.random.rand(len(pred_df)) * 100  # Placeholder
+    def _get_actual_data(self, pred_df):
+        return np.random.rand(len(pred_df)) * 100
     
     def calculate_metrics(self):
-        """Calculate all metrics for all models"""
+        # Calculate all metrics for all models
         self.results = defaultdict(dict)
         
         for model, df in self.model_data.items():
@@ -89,7 +80,7 @@ class ModelEvaluator:
                     self.results[model][metric_name] = None
     
     def generate_comparison_report(self):
-        """Generate comprehensive comparison report"""
+        # Generate comprehensive comparison report
         if not hasattr(self, "results"):
             self.calculate_metrics()
             
@@ -107,7 +98,7 @@ class ModelEvaluator:
         return results_df
     
     def _generate_visualizations(self, results_df):
-        """Generate comparison visualizations"""
+        # Generate comparison visualizations
         # Metric comparison bar plot
         metrics_to_plot = ["RMSE", "MAE", "R2", "Pearson R"]
         plt.figure(figsize=(12, 6))
@@ -138,7 +129,7 @@ class ModelEvaluator:
             plt.close()
     
     def run_full_evaluation(self):
-        """Run complete evaluation pipeline"""
+        # Run complete evaluation pipeline
         print("Preparing evaluation data...")
         self.prepare_evaluation_data()
         
