@@ -1,14 +1,10 @@
 
-import subprocess
 import os
 import pandas as pd
 import numpy as np
 import tensorflow as tf
-from datetime import datetime, timedelta
+from datetime import timedelta
 import pickle
-from tqdm import tqdm
-import argparse
-from collections import defaultdict
 import time
 
 class TrafficPredictor:
@@ -30,7 +26,7 @@ class TrafficPredictor:
         ]
         self.data_path = 'processed_data'
         self.prediction_output_path = 'predicted_csv'
-        self.final_output_path = 'complete_csv_oct_nov_2006'
+        self.final_output_path = 'complete_oct_nov_csv'
         self.seq_length = 24
         self.batch_size = 128
         
@@ -45,7 +41,7 @@ class TrafficPredictor:
             )
 
     class SequenceManager:
-        """Manages sequences for all SCATS Numbers"""
+        # Manages sequences for all SCATS Numbers
         def __init__(self, scats_numbers, seq_length):
             self.scats_numbers = scats_numbers
             self.seq_length = seq_length
@@ -53,7 +49,7 @@ class TrafficPredictor:
             self.avg_traffic = {}
 
         def initialize_sequences(self, df_clean):
-            """Initialize sequences with historical data"""
+            # Initialize sequences with historical data
             for scats in self.scats_numbers:
                 scats_data = df_clean[df_clean["SCATS Number"] == scats].copy()
                 # Sort by date and interval
@@ -66,7 +62,7 @@ class TrafficPredictor:
                 self.sequences[scats] = scats_data
 
         def get_last_sequence(self, scats, target_date, target_interval):
-            """Get the last seq_length intervals before the target"""
+            # Get the last seq_length intervals before the target
             # Create target datetime
             target_dt = target_date + timedelta(
                 hours=int(target_interval // 4), minutes=int((target_interval % 4) * 15)
@@ -86,7 +82,7 @@ class TrafficPredictor:
                 return None
 
         def update_sequence(self, scats, date, interval_id, predicted_value):
-            """Update sequence with new prediction"""
+            # Update sequence with new prediction
             new_row = pd.DataFrame(
                 [
                     {
@@ -106,7 +102,7 @@ class TrafficPredictor:
                 ["Date", "interval_id"])
 
     def engineer_features_batch(self, sequences, scats_indices, avg_traffic_dict):
-        """Engineer features for a batch of sequences"""
+        # Engineer features for a batch of sequences
         engineered_features = []
 
         for seq, scats_idx, avg_traffic in zip(sequences, scats_indices, avg_traffic_dict):
@@ -148,7 +144,7 @@ class TrafficPredictor:
         return np.array(engineered_features)
 
     def prepare_batch_inputs(self, features_batch, feature_cols):
-        """Prepare batch inputs for model"""
+        # Prepare batch inputs for model
         # Normalize features
         batch_size, seq_length, n_features = features_batch.shape
         features_reshaped = features_batch.reshape(-1, n_features)
@@ -163,7 +159,7 @@ class TrafficPredictor:
         return [feature_input, scats_input]
 
     def identify_october_gaps(self, df_clean):
-        """Identify missing intervals in October"""
+        # Identify missing intervals in October
         october_start = pd.Timestamp("2006-10-01")
         october_end = pd.Timestamp("2006-10-31")
 
@@ -210,7 +206,7 @@ class TrafficPredictor:
         return df_october_missing.sort_values(["Date", "interval_id", "SCATS Number"])
 
     def batch_predict_interval(self, seq_manager, scats_numbers, target_date, target_interval, model):
-        """Predict for all SCATS Numbers at a specific interval"""
+        # Predict for all SCATS Numbers at a specific interval
         valid_sequences = []
         valid_scats = []
         valid_scats_indices = []
@@ -255,7 +251,7 @@ class TrafficPredictor:
         return results
 
     def load_data_components(self):
-        """Load processed data components"""
+        # Load processed data components
         print("Loading processed data components...")
         with open(os.path.join(self.data_path, "scaler.pkl"), "rb") as f:
             self.scaler = pickle.load(f)
@@ -273,7 +269,7 @@ class TrafficPredictor:
         self.df_clean["Date"] = self.df_clean["Date"].dt.normalize()
 
     def run_predictions(self, model_info):
-        """Run predictions for a single model"""
+        # Run predictions for a single model
         model_name = model_info['name']
         model_path = model_info['path']
         
@@ -365,12 +361,12 @@ class TrafficPredictor:
         df_predictions = pd.DataFrame(all_predictions)
 
         # Save predictions
-        output_file = os.path.join(model_output_path, "traffic_predictions_oct_nov_2006.csv")
+        output_file = os.path.join(model_output_path, "traffic_predictions_oct_nov.csv")
         df_predictions.to_csv(output_file, index=False)
         print(f"\nSaved predictions to: {output_file}")
 
         # Also save as pickle for faster loading
-        pickle_file = os.path.join(model_output_path, "traffic_predictions_oct_nov_2006.pkl")
+        pickle_file = os.path.join(model_output_path, "traffic_predictions_oct_nov.pkl")
         with open(pickle_file, "wb") as f:
             pickle.dump(df_predictions, f)
 
@@ -439,21 +435,21 @@ class TrafficPredictor:
         self.process_combined_data(model_name)
 
     def process_combined_data(self, model_name):
-        """Process and combine original data with predictions for a specific model"""
+        # Process and combine original data with predictions for a specific model
         print(f"\nProcessing combined data for model: {model_name}")
         
         # Filter for October and November 2006
-        oct_nov_start = pd.Timestamp('2006-10-01')
-        oct_nov_end = pd.Timestamp('2006-11-02 23:59:59')
+        prediction_start = pd.Timestamp('2006-10-01')
+        prediction_end = pd.Timestamp('2006-11-02 23:59:59')
         df_oct_nov = self.df_clean[
-            (self.df_clean['Date'] >= oct_nov_start) & 
-            (self.df_clean['Date'] <= oct_nov_end)
+            (self.df_clean['Date'] >= prediction_start) & 
+            (self.df_clean['Date'] <= prediction_end)
         ].copy()
 
         print(f"Original October-November data: {len(df_oct_nov)} records")
 
         # Load predictions for this model
-        pred_file = os.path.join(self.prediction_output_path, model_name, 'traffic_predictions_oct_nov_2006.csv')
+        pred_file = os.path.join(self.prediction_output_path, model_name, 'traffic_predictions_oct_nov.csv')
         
         if not os.path.exists(pred_file):
             print(f"  Prediction file not found: {pred_file}")
@@ -514,7 +510,7 @@ class TrafficPredictor:
         
         # Get unique SCATS Numbers and dates
         scats_numbers = df_combined['SCATS Number'].unique()
-        dates = pd.date_range(start=oct_nov_start, end=oct_nov_end)
+        dates = pd.date_range(start=prediction_start, end=prediction_end)
         
         # Pre-compute time_of_day mapping for intervals
         time_of_day_map = {i: f"{i // 4:02d}:{(i % 4) * 15:02d}" for i in range(96)}
@@ -606,7 +602,7 @@ class TrafficPredictor:
         print(f"  Records with NaN traffic volume: {df_combined['traffic_volume'].isna().sum()}")
 
     def run_all_models(self):
-        """Run predictions and data processing for all models"""
+        # Run predictions and data processing for all models
         self.load_data_components()
         
         for model in self.models:
