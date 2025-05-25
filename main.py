@@ -34,13 +34,13 @@ display_to_scats = {v: k for k, v in scats_display_map.items()}
 df_data = pd.read_csv("complete_oct_nov_csv\\bilstm_model\\bilstm_model_complete_data.csv")
 df_data['SCATS Number'] = df_data['SCATS Number'].astype(int)
 df_data['Date'] = pd.to_datetime(df_data['Date'])
-traffic_avg = df_data.groupby(['SCATS Number', 'Date', 'time_of_day'])['traffic_volume'].mean().reset_index()
 traffic_dict = defaultdict(dict)
-for _, row in traffic_avg.iterrows():
-    date_str = row['Date'].strftime('%Y-%m-%d')  # date to string
-    if date_str not in traffic_dict[row['SCATS Number']]:
-        traffic_dict[row['SCATS Number']][date_str] = {}
-    traffic_dict[row['SCATS Number']][date_str][row['time_of_day']] = row['traffic_volume']
+for _, row in df_data.iterrows():
+    date_str = row['Date'].strftime('%Y-%m-%d')
+    scats = row['SCATS Number']
+    if date_str not in traffic_dict[scats]:
+        traffic_dict[scats][date_str] = {}
+    traffic_dict[scats][date_str][row['time_of_day']] = row['traffic_volume']
 
 # unique time and date options
 time_options = sorted(df_data['time_of_day'].unique())
